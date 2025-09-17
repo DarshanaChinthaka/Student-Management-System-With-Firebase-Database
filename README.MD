@@ -6,7 +6,7 @@ A simple and clean \*\*Student Management System\*\* built with \*\*HTML, CSS, a
 
 
 
-!\[App Screenshot](https://user-images.githubusercontent.com/your-screenshot.png)
+!\[Live Website](https://darshanachinthaka.github.io/Student-Management-System-With-Firebase-Database/)
 
 
 
