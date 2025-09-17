@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Student Management System (HTML/CSS/JS + Firebase JSON)</title>
+  <style>
+    :root{--accent:#5b6cff;--bg:#f6f7fb;--card:#fff;--muted:#6b7280}
+    *{box-sizing:border-box}
+    body{font-family:Inter, system-ui, Arial; margin:0; background:var(--bg); color:#111}
+    .wrap{max-width:1000px;margin:28px auto;padding:20px}
+    header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+    h1{font-size:20px;margin:0}
+    .card{background:var(--card);border-radius:12px;padding:16px;box-shadow:0 6px 18px rgba(23,23,23,0.06)}
+    form .row{display:flex;gap:12px;margin-bottom:10px}
+    input,select{flex:1;padding:8px 10px;border:1px solid #e6e7ee;border-radius:8px}
+    label{font-size:13px;color:var(--muted);display:block;margin-bottom:6px}
+    .btn{background:var(--accent);color:#fff;padding:8px 12px;border-radius:8px;border:0;cursor:pointer}
+    .btn.secondary{background:#fff;color:var(--accent);border:1px solid #e6e7ee}
+    table{width:100%;border-collapse:collapse;margin-top:12px}
+    th,td{padding:10px;border-bottom:1px solid #f1f3f6;text-align:left;font-size:14px}
+    th{background:#fafafa}
+    .actions button{margin-right:6px}
+    .small{font-size:12px;color:var(--muted)}
+    .flex{display:flex;gap:8px;align-items:center}
+    .search{width:260px}
+    @media(max-width:760px){.row{flex-direction:column}.search{width:100%}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Student Management System</h1>
+      <div class="flex">
+        <input class="search" id="searchInput" placeholder="Search by name or email" />
+        <button class="btn" id="exportBtn">Export JSON</button>
+        <input type="file" id="importFile" accept="application/json" style="display:none" />
+        <button class="btn secondary" id="importBtn">Import JSON</button>
+      </div>
+    </header>
+
+    <section class="card">
+      <form id="studentForm">
+        <input type="hidden" id="studentId" />
+        <div class="row">
+          <div style="flex:2">
+            <label for="name">Full name</label>
+            <input id="name" required />
+          </div>
+          <div>
+            <label for="email">Email</label>
+            <input id="email" type="email" required />
+          </div>
+        </div>
+
+        <div class="row">
+          <div>
+            <label for="dob">Date of birth</label>
+            <input id="dob" type="date" />
+          </div>
+          <div>
+            <label for="gender">Gender</label>
+            <select id="gender">
+              <option value="">--select--</option>
+              <option>Male</option>
+              <option>Female</option>
+              <option>Other</option>
+            </select>
+          </div>
+          <div>
+            <label for="course">Course</label>
+            <input id="course" />
+          </div>
+        </div>
+
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px">
+          <button type="reset" class="btn secondary" id="resetBtn">Clear</button>
+          <button class="btn" id="saveBtn">Save student</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="card" style="margin-top:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div class="small">Students list</div>
+        <div class="small">Total: <span id="totalCount">0</span></div>
+      </div>
+
+      <table id="studentsTable">
+        <thead>
+          <tr><th>Name</th><th>Email</th><th>DOB</th><th>Gender</th><th>Course</th><th>Actions</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <p class="small" style="margin-top:10px">Notes: This example uses Firebase Realtime Database (JSON). Replace the firebaseConfig with your project values.</p>
+  </div>
+
+  <!-- Firebase (old-style CDN v8) - quick and easy for examples -->
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+
+  <script>
+    // ------------------ CONFIGURE THIS ------------------
+    // Go to Firebase console -> Add web app -> copy config below
+    const firebaseConfig = {
+    apiKey: "AIzaSyDqG5IEx6ezkqZ80Hw2RPGT7QKkeyMOkVU",
+    authDomain: "studentmanagementsystem-b465e.firebaseapp.com",
+    projectId: "studentmanagementsystem-b465e",
+    storageBucket: "studentmanagementsystem-b465e.firebasestorage.app",
+    messagingSenderId: "887626909018",
+    appId: "1:887626909018:web:410b2ed61b135be8c2df63"
+  };
+    // ---------------------------------------------------
+
+    // initialize
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+    const studentsRef = db.ref('students'); // top-level JSON node
+
+    // UI refs
+    const form = document.getElementById('studentForm');
+    const nameIn = document.getElementById('name');
+    const emailIn = document.getElementById('email');
+    const dobIn = document.getElementById('dob');
+    const genderIn = document.getElementById('gender');
+    const courseIn = document.getElementById('course');
+    const studentIdIn = document.getElementById('studentId');
+    const tbody = document.querySelector('#studentsTable tbody');
+    const totalCount = document.getElementById('totalCount');
+    const searchInput = document.getElementById('searchInput');
+    const exportBtn = document.getElementById('exportBtn');
+    const importBtn = document.getElementById('importBtn');
+    const importFile = document.getElementById('importFile');
+
+    // local cache for easy search/sort
+    let studentsCache = {};
+
+    // listen for realtime updates
+    studentsRef.on('value', snapshot => {
+      studentsCache = snapshot.val() || {};
+      renderTable(studentsCache);
+    });
+
+    // form submit - add or update
+    form.addEventListener('submit', e => {
+      e.preventDefault();
+      const id = studentIdIn.value.trim();
+      const data = {
+        name: nameIn.value.trim(),
+        email: emailIn.value.trim(),
+        dob: dobIn.value || '',
+        gender: genderIn.value || '',
+        course: courseIn.value || ''
+      };
+      if(!data.name || !data.email){
+        alert('Name and email are required');
+        return; }
+
+      if(id){
+        // update
+        studentsRef.child(id).set(data).then(()=>{
+          resetForm();
+        }).catch(err=>alert(err.message));
+      } else {
+        // create new (push generates unique key)
+        studentsRef.push(data).then(()=>{
+          resetForm();
+        }).catch(err=>alert(err.message));
+      }
+    });
+
+    // reset form
+    function resetForm(){
+      form.reset();
+      studentIdIn.value = '';
+      document.getElementById('saveBtn').textContent = 'Save student';
+    }
+
+    // render table
+    function renderTable(data){
+      tbody.innerHTML = '';
+      const list = Object.entries(data || {});
+      totalCount.textContent = list.length;
+
+      // apply search
+      const q = searchInput.value.trim().toLowerCase();
+      const filtered = list.filter(([id, st]) => {
+        if(!q) return true;
+        return (st.name || '').toLowerCase().includes(q) || (st.email || '').toLowerCase().includes(q);
+      });
+
+      // sort by name
+      filtered.sort((a,b)=> (a[1].name||'').localeCompare(b[1].name||''));
+
+      for(const [id, st] of filtered){
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${escapeHtml(st.name||'')}</td>
+          <td>${escapeHtml(st.email||'')}</td>
+          <td>${escapeHtml(st.dob||'')}</td>
+          <td>${escapeHtml(st.gender||'')}</td>
+          <td>${escapeHtml(st.course||'')}</td>
+          <td class="actions">
+            <button class="btn secondary" data-id="${id}" data-action="edit">Edit</button>
+            <button class="btn" data-id="${id}" data-action="delete">Delete</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      }
+
+      // attach action listeners (delegation could be used)
+      tbody.querySelectorAll('button').forEach(btn=>{
+        btn.addEventListener('click', () => {
+          const id = btn.dataset.id;
+          const action = btn.dataset.action;
+          if(action === 'edit') loadForEdit(id);
+          if(action === 'delete') removeStudent(id);
+        });
+      });
+    }
+
+    // load for edit
+    function loadForEdit(id){
+      const st = studentsCache[id];
+      if(!st) return alert('Record not found');
+      studentIdIn.value = id;
+      nameIn.value = st.name || '';
+      emailIn.value = st.email || '';
+      dobIn.value = st.dob || '';
+      genderIn.value = st.gender || '';
+      courseIn.value = st.course || '';
+      document.getElementById('saveBtn').textContent = 'Update student';
+      window.scrollTo({top:0,behavior:'smooth'});
+    }
+
+    // delete
+    function removeStudent(id){
+      if(!confirm('Delete this student?')) return;
+      studentsRef.child(id).remove().catch(err=>alert(err.message));
+    }
+
+    // simple escaping
+    function escapeHtml(s){
+      return String(s)
+        .replace(/&/g,'&amp;')
+        .replace(/</g,'&lt;')
+        .replace(/>/g,'&gt;')
+        .replace(/"/g,'&quot;')
+        .replace(/'/g,'&#039;');
+    }
+
+    // search
+    searchInput.addEventListener('input', ()=> renderTable(studentsCache));
+
+    // Export JSON
+    exportBtn.addEventListener('click', ()=>{
+      const data = studentsCache || {};
+      const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'students.json';
+      a.click(); URL.revokeObjectURL(url);
+    });
+
+    // Import JSON (merge)
+    importBtn.addEventListener('click', ()=> importFile.click());
+    importFile.addEventListener('change', async (e)=>{
+      const f = e.target.files[0];
+      if(!f) return;
+      try{
+        const text = await f.text();
+        const obj = JSON.parse(text);
+        // merge: write top-level keys under /students
+        const updates = {};
+        for(const key in obj){
+          // keep original key names or use push? we accept both shapes
+          if(obj.hasOwnProperty(key)){
+            updates[key] = obj[key];
+          }
+        }
+        // Use update to merge
+        studentsRef.update(updates).then(()=>alert('Imported successfully')).catch(err=>alert(err.message));
+      } catch(err){alert('Invalid JSON: '+err.message)}
+      importFile.value = '';
+    });
+
+    // helpful: initial instructions if no config
+    if(firebaseConfig.apiKey.includes('YOUR_')){
+      console.warn('Replace firebaseConfig placeholders with your own Firebase project values. Also enable Realtime Database in Firebase console. For quick testing, set rules to {"rules": {".read": true, ".write": true}} but secure properly before production.');
+    }
+  </script>
+</body>
+</html>
